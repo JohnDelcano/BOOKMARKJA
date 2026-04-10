@@ -41,28 +41,17 @@ function App() {
   const [bookmarks, setBookmarks] = useState([]);
 
   const [page, setPage] = useState("home");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-
-
+  // =========================
+  // AUTH
+  // =========================
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, "bookmarks"), (snap) => {
-      setBookmarks(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-      );
-    });
-
-    return () => unsub();
-  }, []);
-
   const googleLogin = async () => {
     const provider = new GoogleAuthProvider();
-
     provider.setCustomParameters({
       prompt: "select_account",
     });
@@ -74,6 +63,20 @@ function App() {
     await signOut(auth);
   };
 
+  // =========================
+  // FIRESTORE LISTENER
+  // =========================
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "bookmarks"), (snap) => {
+      setBookmarks(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => unsub();
+  }, []);
+
+  // =========================
+  // CRUD
+  // =========================
   const addBookmark = async () => {
     if (!user || !title) return;
 
@@ -102,6 +105,9 @@ function App() {
     });
   };
 
+  // =========================
+  // FILTER + SORT
+  // =========================
   const filtered = user
     ? bookmarks
         .filter((b) => {
@@ -110,8 +116,7 @@ function App() {
             .toLowerCase()
             .includes(search.toLowerCase());
           const matchType = filter === "all" ? true : b.type === filter;
-          const matchPage =
-            page === "favorites" ? b.favorite : true;
+          const matchPage = page === "favorites" ? b.favorite : true;
 
           return matchUser && matchSearch && matchType && matchPage;
         })
@@ -123,6 +128,9 @@ function App() {
         })
     : [];
 
+  // =========================
+  // LOGIN SCREEN
+  // =========================
   if (!user) {
     return (
       <div className="loginPage">
@@ -134,24 +142,18 @@ function App() {
     );
   }
 
+  // =========================
+  // MAIN APP
+  // =========================
   return (
     <div className="appLayout">
 
-      <button
-        className="hamburger"
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-      >
-        ☰
-      </button>
-
-      <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+      {/* SIDEBAR (PERMANENT) */}
+      <div className="sidebar">
 
         <button
           className={page === "home" ? "activeNav" : ""}
-          onClick={() => {
-            setPage("home");
-            setSidebarOpen(false);
-          }}
+          onClick={() => setPage("home")}
         >
           <img src={home} alt="" />
           <h5>Home</h5>
@@ -159,10 +161,7 @@ function App() {
 
         <button
           className={page === "favorites" ? "activeNav" : ""}
-          onClick={() => {
-            setPage("favorites");
-            setSidebarOpen(false);
-          }}
+          onClick={() => setPage("favorites")}
         >
           <img src={favorite} alt="" />
           <h5>Favorite</h5>
@@ -176,10 +175,7 @@ function App() {
         </div>
       </div>
 
-      {sidebarOpen && (
-        <div className="backdrop" onClick={() => setSidebarOpen(false)} />
-      )}
-
+      {/* MAIN CONTENT */}
       <div className={`mainContent page-${page}`}>
 
         <div className="header">
@@ -191,6 +187,7 @@ function App() {
           </div>
         </div>
 
+        {/* FORM */}
         {page === "home" && (
           <div className="form">
 
@@ -206,8 +203,6 @@ function App() {
               onChange={(e) => setImageUrl(e.target.value)}
             />
 
-          
-
             <select value={type} onChange={(e) => setType(e.target.value)}>
               <option value="anime">Anime</option>
               <option value="manga">Manga</option>
@@ -219,6 +214,7 @@ function App() {
           </div>
         )}
 
+        {/* CONTROLS */}
         <div className="controls">
           <input
             placeholder="Search..."
@@ -233,6 +229,7 @@ function App() {
           </select>
         </div>
 
+        {/* FILTERS */}
         <div className="filters">
           {["all", "anime", "manga", "manhwa", "manhua"].map((t) => (
             <button
@@ -245,9 +242,11 @@ function App() {
           ))}
         </div>
 
+        {/* GRID */}
         <div className="grid">
           {filtered.map((b) => (
             <div className="card" key={b.id}>
+
               <div className="imageWrapper">
                 <img src={b.imageUrl} alt={b.title} />
 
@@ -257,30 +256,21 @@ function App() {
                     className="iconBtn favoriteBtn"
                     onClick={() => toggleFavorite(b.id, b.favorite)}
                   >
-                    <img
-                      src={b.favorite ? unlove : love}
-                      alt="favorite"
-                    />
+                    <img src={b.favorite ? unlove : love} alt="" />
                   </button>
 
                   <button
                     className="iconBtn deleteBtn"
                     onClick={() => deleteBookmark(b.id)}
                   >
-                    <img src={remove} alt="delete" />
+                    <img src={remove} alt="" />
                   </button>
 
                 </div>
-            </div>
+              </div>
 
               <div className="cardContent">
                 <h3>{b.title}</h3>
-              </div>
-
-              <div className="genreTags">
-                {b.genres?.map((g) => (
-                  <span key={g} className="tag">{g}</span>
-                ))}
               </div>
 
             </div>
