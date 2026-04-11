@@ -27,7 +27,7 @@ function App() {
   /* =========================
      STATES
   ========================= */
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState("loading"); // "loading" | null | { user object }
   const [page, setPage] = useState("home");
 
   const [feed, setFeed] = useState([]);
@@ -56,8 +56,21 @@ function App() {
      AUTH
   ========================= */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
-    return () => unsub();
+    // Add 7-second timeout for auth to avoid infinite loading
+    const authTimeout = setTimeout(() => {
+      console.warn("Auth loading timed out, showing login");
+      setUser(null);
+    }, 7000);
+
+    const unsub = onAuthStateChanged(auth, (currentUser) => {
+      clearTimeout(authTimeout);
+      setUser(currentUser);
+    });
+
+    return () => {
+      clearTimeout(authTimeout);
+      unsub();
+    };
   }, []);
 
   const login = async () => {
@@ -73,9 +86,16 @@ function App() {
      FIRESTORE — BOOKMARKS
   ========================= */
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "bookmarks"), (snap) => {
-      setBookmarks(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = onSnapshot(
+      collection(db, "bookmarks"),
+      (snap) => {
+        setBookmarks(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (error) => {
+        console.error("Bookmarks listener error:", error);
+        setBookmarks([]);
+      }
+    );
     return () => unsub();
   }, []);
 
@@ -83,11 +103,18 @@ function App() {
      FIRESTORE — CATEGORIES
   ========================= */
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "categories"), (snap) => {
-      setCategories(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = onSnapshot(
+      collection(db, "categories"),
+      (snap) => {
+        setCategories(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (error) => {
+        console.error("Categories listener error:", error);
+        setCategories([]);
+      }
+    );
     return () => unsub();
-  }, []);
+  }, []);}
 
   const shuffleArray = (array) => {
   return [...array].sort(() => Math.random() - 0.5);
@@ -275,11 +302,11 @@ function App() {
   /* =========================
      AUTH UI SAFE
   ========================= */
-  if (user === null) {
+  if (user === "loading") {
     return (
       <div className="loginPage">
         <h1>Hybrid Feed</h1>
-        <p>Loading...</p>
+        <p>Initializing... ⏳</p>
       </div>
     );
   }
@@ -362,6 +389,12 @@ function App() {
             <button className={filter === "manhwa" ? "active" : ""} onClick={() => setFilter("manhwa")}>Manhwa</button>
             <button className={filter === "manhua" ? "active" : ""} onClick={() => setFilter("manhua")}>Manhua</button>
           </div>
+
+          {feedLoading && (
+            <p style={{ color: "#aaa", marginTop: "20px", textAlign: "center", fontSize: "16px" }}>
+              Loading anime, manga, manhwa, manhua... ⏳
+            </p>
+          )}
 
           <div className="grid">
             {(filter === "all"
@@ -859,13 +892,19 @@ const searchAniList = async (text) => {
       }
     }
   `;
-  const res = await fetch("https://graphql.anilist.co", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables: { search: text } }),
-  });
-  const data = await res.json();
-  return data.data.Page.media.map((i) => ({ ...i, source: "anilist" }));
+  try {
+    const res = await fetchWithTimeout("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables: { search: text } }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.data?.Page?.media || [];
+  } catch (error) {
+    console.error("searchAniList failed:", error);
+    return [];
+  }
 };
 
 export default App;
