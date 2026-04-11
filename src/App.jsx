@@ -105,7 +105,6 @@ function App() {
             fetchTopManga(),
             fetchTopManhwa(),
             fetchTopManhua(),
-            fetchMangaDex(),
           ]),
           new Promise((resolve) =>
             setTimeout(() => resolve("TIMEOUT"), 10000)
