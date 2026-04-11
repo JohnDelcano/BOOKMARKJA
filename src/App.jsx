@@ -296,8 +296,16 @@ function App() {
   if (user === "loading") {
     return (
       <div className="loginPage">
-        <h1>Hybrid Feed</h1>
-        <p>Initializing... ⏳</p>
+        <div className="loginContainer">
+          <div className="loginHeader">
+            <h1>🔖 BookmarkJA</h1>
+            <p>Your Personal Anime & Manga Library</p>
+          </div>
+          <div className="loadingSpinner">
+            <div className="spinner"></div>
+            <p>Initializing... ⏳</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -305,8 +313,34 @@ function App() {
   if (!user) {
     return (
       <div className="loginPage">
-        <h1>Hybrid Feed</h1>
-        <button onClick={login}>Login</button>
+        <div className="loginContainer">
+          <div className="loginHeader">
+            <h1>🔖 BookmarkJA</h1>
+            <p>Your Personal Anime & Manga Library</p>
+          </div>
+          <div className="loginContent">
+            <div className="featureList">
+              <div className="feature">
+                <span>📚</span>
+                <p>Discover & Bookmark</p>
+              </div>
+              <div className="feature">
+                <span>🏷️</span>
+                <p>Organize with Categories</p>
+              </div>
+              <div className="feature">
+                <span>🔍</span>
+                <p>Search Anime & Manga</p>
+              </div>
+            </div>
+            <button className="loginBtn" onClick={login}>
+              Sign in with Google
+            </button>
+            <p className="loginFooter">
+              Manage your favorite anime, manga, manhwa, and manhua in one place
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
