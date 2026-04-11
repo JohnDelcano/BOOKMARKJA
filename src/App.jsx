@@ -50,7 +50,7 @@ function App() {
   const [bookmarkFilter, setBookmarkFilter] = useState("all");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showAddCategory, setShowAddCategory] = useState(false);
-
+  const [shuffledFeed, setShuffledFeed] = useState([]);
   /* =========================
      AUTH
   ========================= */
@@ -88,6 +88,10 @@ function App() {
     return () => unsub();
   }, []);
 
+  const shuffleArray = (array) => {
+  return [...array].sort(() => Math.random() - 0.5);
+};
+
   /* =========================
      FEED (TOP RATED ONLY)
   ========================= */
@@ -108,6 +112,7 @@ function App() {
       );
 
       setFeed(unique);
+      setShuffledFeed(shuffleArray(unique)); // shuffle once only
     };
 
     load();
@@ -325,20 +330,28 @@ function App() {
           </div>
 
           <div className="grid">
-            {displayFeed
-              .filter((item) => {
-                const text = search.toLowerCase();
-                const title = getTitle(item.title).toLowerCase();
-                const desc = item.description?.toLowerCase() || "";
-                const genres = item.genres?.join(" ").toLowerCase() || "";
-                const matchesSearch =
-                  title.includes(text) ||
-                  desc.includes(text) ||
-                  genres.includes(text);
-                const type = detectType(item);
-                return matchesSearch && (filter === "all" || type === filter);
-              })
-              .map((item) => (
+            {(filter === "all"
+              ? shuffledFeed
+              : displayFeed
+            )
+            .filter((item) => {
+              const text = search.toLowerCase();
+
+              const title = getTitle(item.title).toLowerCase();
+              const desc = item.description?.toLowerCase() || "";
+              const genres = item.genres?.join(" ").toLowerCase() || "";
+
+              const matchesSearch =
+                title.includes(text) ||
+                desc.includes(text) ||
+                genres.includes(text);
+
+              const type = detectType(item);
+
+              return matchesSearch && (filter === "all" || type === filter);
+            })
+            .map((item) => (
+            
                 <div
                   key={`${item.source}-${item.id}`}
                   className={`card${activeCard === item.id ? " flipped" : ""}`}
@@ -626,9 +639,17 @@ const fetchTopAnime = async () => {
   const query = `
     query {
       Page(page: 1, perPage: 20) {
-        media(type: ANIME, sort: SCORE_DESC) {
-          id type title { romaji english }
-          description genres countryOfOrigin
+        media(
+          type: ANIME
+          sort: SCORE_DESC
+          isAdult: false
+          genre_not_in: ["Ecchi", "Hentai"]
+        ) {
+          id type
+          title { romaji english }
+          description
+          genres
+          countryOfOrigin
           coverImage { large }
         }
       }
@@ -647,7 +668,7 @@ const fetchTopManga = async () => {
   const query = `
     query {
       Page(page: 1, perPage: 20) {
-        media(type: MANGA, sort: SCORE_DESC) {
+        media(type: MANGA, sort: SCORE_DESC, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
           id title { romaji english }
           description genres countryOfOrigin
           coverImage { large }
@@ -668,7 +689,7 @@ const fetchTopManhwa = async () => {
   const query = `
     query {
       Page(page: 1, perPage: 20) {
-        media(type: MANGA, countryOfOrigin: KR, sort: SCORE_DESC) {
+        media(type: MANGA, countryOfOrigin: KR, sort: SCORE_DESC, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
           id title { romaji english }
           description genres countryOfOrigin
           coverImage { large }
@@ -689,7 +710,7 @@ const fetchTopManhua = async () => {
   const query = `
     query {
       Page(page: 1, perPage: 20) {
-        media(type: MANGA, countryOfOrigin: CN, sort: SCORE_DESC) {
+        media(type: MANGA, countryOfOrigin: CN, sort: SCORE_DESC, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
           id title { romaji english }
           description genres countryOfOrigin
           coverImage { large }
@@ -735,7 +756,7 @@ const searchAniList = async (text) => {
   const query = `
     query ($search: String) {
       Page(page: 1, perPage: 20) {
-        media(search: $search) {
+        media(search: $search, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
           id type title { romaji english }
           description genres countryOfOrigin
           coverImage { large }
