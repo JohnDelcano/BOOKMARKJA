@@ -6,6 +6,7 @@ import {
   onSnapshot,
   deleteDoc,
   doc,
+  serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
 
@@ -18,44 +19,48 @@ import {
 
 import "./styles.css";
 
-import home from "./assets/house.png";
-import favorite from "./assets/food-tray.png";
-import exit from "./assets/exit.png";
-import love from "./assets/heart.png";
-import unlove from "./assets/lover.png";
-import remove from "./assets/deleted.png";
+import homeIcon from "./assets/house.png";
+import bookmarkNavIcon from "./assets/food-tray.png";
+import exitIcon from "./assets/exit.png";
 
 function App() {
+  /* =========================
+     STATES
+  ========================= */
   const [user, setUser] = useState(null);
-
-  const [title, setTitle] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [type, setType] = useState("anime");
-
-  const [genres, setGenres] = useState([]);
-
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [sort, setSort] = useState("latest");
-
-  const [bookmarks, setBookmarks] = useState([]);
-
   const [page, setPage] = useState("home");
 
-  // =========================
-  // AUTH
-  // =========================
+  const [feed, setFeed] = useState([]);
+  const [bookmarks, setBookmarks] = useState([]);
+  const [categories, setCategories] = useState([]);
+
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  const [filter, setFilter] = useState("all");
+  const [activeCard, setActiveCard] = useState(null);
+
+  // Bookmark modal (from card)
+  const [bookmarkModalItem, setBookmarkModalItem] = useState(null);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+
+  // Bookmark page states
+  const [bookmarkSearch, setBookmarkSearch] = useState("");
+  const [bookmarkFilter, setBookmarkFilter] = useState("all");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [showAddCategory, setShowAddCategory] = useState(false);
+
+  /* =========================
+     AUTH
+  ========================= */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return () => unsub();
   }, []);
 
-  const googleLogin = async () => {
+  const login = async () => {
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({
-      prompt: "select_account",
-    });
-
     await signInWithPopup(auth, provider);
   };
 
@@ -63,223 +68,688 @@ function App() {
     await signOut(auth);
   };
 
-  // =========================
-  // FIRESTORE LISTENER
-  // =========================
+  /* =========================
+     FIRESTORE — BOOKMARKS
+  ========================= */
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "bookmarks"), (snap) => {
       setBookmarks(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-
     return () => unsub();
   }, []);
 
-  // =========================
-  // CRUD
-  // =========================
-  const addBookmark = async () => {
-    if (!user || !title) return;
-
-    await addDoc(collection(db, "bookmarks"), {
-      uid: user.uid,
-      title,
-      imageUrl,
-      type,
-      genres,
-      favorite: false,
-      createdAt: Date.now(),
+  /* =========================
+     FIRESTORE — CATEGORIES
+  ========================= */
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "categories"), (snap) => {
+      setCategories(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
+    return () => unsub();
+  }, []);
 
-    setTitle("");
-    setImageUrl("");
-    setGenres([]);
+  /* =========================
+     FEED (TOP RATED ONLY)
+  ========================= */
+  useEffect(() => {
+    const load = async () => {
+      const [anime, manga, manhwa, manhua, md] = await Promise.all([
+        fetchTopAnime(),
+        fetchTopManga(),
+        fetchTopManhwa(),
+        fetchTopManhua(),
+        fetchMangaDex(),
+      ]);
+
+      const merged = [...anime, ...manga, ...manhwa, ...manhua, ...md];
+
+      const unique = Array.from(
+        new Map(merged.map((i) => [`${i.source}-${i.id}`, i])).values()
+      );
+
+      setFeed(unique);
+    };
+
+    load();
+  }, []);
+
+  /* =========================
+     GLOBAL SEARCH (AniList ONLY)
+  ========================= */
+  useEffect(() => {
+    const delay = setTimeout(async () => {
+      const text = search.trim();
+
+      if (text.length > 2) {
+        setIsSearching(true);
+        const results = await searchAniList(text);
+        setSearchResults(results);
+      } else {
+        setIsSearching(false);
+        setSearchResults([]);
+      }
+    }, 400);
+
+    return () => clearTimeout(delay);
+  }, [search]);
+
+  /* =========================
+     HELPERS
+  ========================= */
+  const getTitle = (t) => t?.english || t?.romaji || "No Title";
+  const cleanHTML = (t) => t?.replace(/<[^>]+>/g, "");
+
+  const detectType = (item) => {
+  // 🔥 FIRST: use your custom mediaType
+  if (item.mediaType) return item.mediaType;
+
+  // fallback (for search results)
+  if (item.type === "ANIME") return "anime";
+  if (item.source === "mangadex") return "manga";
+  if (item.countryOfOrigin === "KR") return "manhwa";
+  if (item.countryOfOrigin === "CN") return "manhua";
+
+  return "manga";
+};
+
+  const isBookmarked = (item) =>
+    bookmarks.some((b) => b.mediaId === item.id);
+
+  /* =========================
+     BOOKMARK MODAL OPEN
+  ========================= */
+  const openBookmarkModal = (e, item) => {
+    e.stopPropagation();
+    setBookmarkModalItem(item);
+    // pre-select existing categories for this item
+    const existing = bookmarks.find((b) => b.mediaId === item.id);
+    setSelectedCategories(existing?.categories || []);
   };
 
-  const deleteBookmark = async (id) => {
+  const closeBookmarkModal = () => {
+    setBookmarkModalItem(null);
+    setSelectedCategories([]);
+  };
+
+  const toggleCategorySelection = (catId) => {
+    setSelectedCategories((prev) =>
+      prev.includes(catId) ? prev.filter((c) => c !== catId) : [...prev, catId]
+    );
+  };
+
+  /* =========================
+     CONFIRM BOOKMARK (OK)
+  ========================= */
+  const confirmBookmark = async () => {
+    if (!bookmarkModalItem) return;
+    const item = bookmarkModalItem;
+    const existing = bookmarks.find((b) => b.mediaId === item.id);
+
+    if (existing) {
+      await updateDoc(doc(db, "bookmarks", existing.id), {
+        categories: selectedCategories,
+      });
+    } else {
+      await addDoc(collection(db, "bookmarks"), {
+        uid: user.uid,
+        mediaId: item.id,
+        title: getTitle(item.title),
+        imageUrl: item.coverImage?.large,
+        description: cleanHTML(item.description),
+        categories: selectedCategories,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    closeBookmarkModal();
+  };
+
+  /* =========================
+     REMOVE BOOKMARK
+  ========================= */
+  const removeBookmark = async (id) => {
     await deleteDoc(doc(db, "bookmarks", id));
   };
 
-  const toggleFavorite = async (id, current) => {
-    await updateDoc(doc(db, "bookmarks", id), {
-      favorite: !current,
+  /* =========================
+     ADD CATEGORY
+  ========================= */
+  const addCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    await addDoc(collection(db, "categories"), {
+      uid: user.uid,
+      name,
+      createdAt: serverTimestamp(),
     });
+    setNewCategoryName("");
+    setShowAddCategory(false);
   };
 
-  // =========================
-  // FILTER + SORT
-  // =========================
-  const filtered = user
-    ? bookmarks
-        .filter((b) => {
-          const matchUser = b.uid === user.uid;
-          const matchSearch = b.title
-            .toLowerCase()
-            .includes(search.toLowerCase());
-          const matchType = filter === "all" ? true : b.type === filter;
-          const matchPage = page === "favorites" ? b.favorite : true;
+  /* =========================
+     DELETE CATEGORY
+  ========================= */
+  const deleteCategory = async (id) => {
+    await deleteDoc(doc(db, "categories", id));
+  };
 
-          return matchUser && matchSearch && matchType && matchPage;
-        })
-        .sort((a, b) => {
-          if (sort === "latest") return b.createdAt - a.createdAt;
-          if (sort === "a-z") return a.title.localeCompare(b.title);
-          if (sort === "z-a") return b.title.localeCompare(a.title);
-          return 0;
-        })
-    : [];
-
-  // =========================
-  // LOGIN SCREEN
-  // =========================
-  if (!user) {
+  /* =========================
+     AUTH UI SAFE
+  ========================= */
+  if (user === null) {
     return (
       <div className="loginPage">
-        <div className="overlay">
-          <h1>Bookmarks</h1>
-          <button onClick={googleLogin}>Continue with Google</button>
-        </div>
+        <h1>Hybrid Feed</h1>
+        <p>Loading...</p>
       </div>
     );
   }
 
-  // =========================
-  // MAIN APP
-  // =========================
+  if (!user) {
+    return (
+      <div className="loginPage">
+        <h1>Hybrid Feed</h1>
+        <button onClick={login}>Login</button>
+      </div>
+    );
+  }
+
+  /* =========================
+     DISPLAY LOGIC
+  ========================= */
+  const displayFeed = isSearching ? searchResults : feed;
+
+  const filteredBookmarks = bookmarks.filter((b) => {
+    const matchSearch = b.title
+      ?.toLowerCase()
+      .includes(bookmarkSearch.toLowerCase());
+    const matchFilter =
+      bookmarkFilter === "all" || b.categories?.includes(bookmarkFilter);
+    return matchSearch && matchFilter;
+  });
+
+  /* =========================
+     UI
+  ========================= */
   return (
-    <div className="appLayout">
+    <div className="layout">
 
-      {/* SIDEBAR (PERMANENT) */}
+      {/* ── SIDEBAR ── */}
       <div className="sidebar">
-
         <button
-          className={page === "home" ? "activeNav" : ""}
+          className={page === "home" ? "active" : ""}
           onClick={() => setPage("home")}
         >
-          <img src={home} alt="" />
-          <h5>Home</h5>
+          <img src={homeIcon} alt="Home" />
         </button>
 
         <button
-          className={page === "favorites" ? "activeNav" : ""}
-          onClick={() => setPage("favorites")}
+          className={page === "bookmarks" ? "active" : ""}
+          onClick={() => setPage("bookmarks")}
         >
-          <img src={favorite} alt="" />
-          <h5>Favorite</h5>
+          <img src={bookmarkNavIcon} alt="Bookmarks" />
         </button>
 
-        <div className="sidebarBottom">
+        <div className="bottom">
           <button onClick={logout}>
-            <img src={exit} alt="" />
-            <h5>Logout</h5>
+            <img src={exitIcon} alt="Logout" />
           </button>
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div className={`mainContent page-${page}`}>
+      {/* ── MAIN ── */}
+      <div className={`main${bookmarkModalItem ? " blurred" : ""}`}>
 
-        <div className="header">
-          <h2>{page === "home" ? "Bookmarks" : "Favorites"}</h2>
-
-          <div className="profile">
-            <img src={user.photoURL} className="avatar" />
-            <p>{user.displayName?.split(" ")[0]}</p>
-          </div>
-        </div>
-
-        {/* FORM */}
+        {/* ══ HOME PAGE ══ */}
         {page === "home" && (
-          <div className="form">
-
-            <input
-              placeholder="Title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-
-            <input
-              placeholder="Image URL"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-            />
-
-            <select value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="anime">Anime</option>
-              <option value="manga">Manga</option>
-              <option value="manhwa">Manhwa</option>
-              <option value="manhua">Manhua</option>
-            </select>
-
-            <button onClick={addBookmark}>Add Bookmark</button>
-          </div>
-        )}
-
-        {/* CONTROLS */}
-        <div className="controls">
+          <>
           <input
-            placeholder="Search..."
+            className="searchBar"
+            placeholder="Search anime, manga, manhwa, manhua..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
 
-          <select onChange={(e) => setSort(e.target.value)}>
-            <option value="latest">Latest</option>
-            <option value="a-z">A-Z</option>
-            <option value="z-a">Z-A</option>
-          </select>
-        </div>
+          {isSearching && (
+            <p style={{ color: "#aaa", marginTop: "10px" }}>
+              Searching results...
+            </p>
+          )}
 
-        {/* FILTERS */}
-        <div className="filters">
-          {["all", "anime", "manga", "manhwa", "manhua"].map((t) => (
-            <button
-              key={t}
-              className={filter === t ? "activeFilter" : ""}
-              onClick={() => setFilter(t)}
-            >
-              {t.toUpperCase()}
-            </button>
-          ))}
-        </div>
+          <div className="filterBar">
+            <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All</button>
+            <button className={filter === "anime" ? "active" : ""} onClick={() => setFilter("anime")}>Anime</button>
+            <button className={filter === "manga" ? "active" : ""} onClick={() => setFilter("manga")}>Manga</button>
+            <button className={filter === "manhwa" ? "active" : ""} onClick={() => setFilter("manhwa")}>Manhwa</button>
+            <button className={filter === "manhua" ? "active" : ""} onClick={() => setFilter("manhua")}>Manhua</button>
+          </div>
 
-        {/* GRID */}
-        <div className="grid">
-          {filtered.map((b) => (
-            <div className="card" key={b.id}>
+          <div className="grid">
+            {displayFeed
+              .filter((item) => {
+                const text = search.toLowerCase();
+                const title = getTitle(item.title).toLowerCase();
+                const desc = item.description?.toLowerCase() || "";
+                const genres = item.genres?.join(" ").toLowerCase() || "";
+                const matchesSearch =
+                  title.includes(text) ||
+                  desc.includes(text) ||
+                  genres.includes(text);
+                const type = detectType(item);
+                return matchesSearch && (filter === "all" || type === filter);
+              })
+              .map((item) => (
+                <div
+                  key={`${item.source}-${item.id}`}
+                  className={`card${activeCard === item.id ? " flipped" : ""}`}
+                  onClick={() =>
+                    setActiveCard(activeCard === item.id ? null : item.id)
+                  }
+                >
+                  <div className="cardFront">
+                    <div className="cardCover">
+                      <img src={item.coverImage?.large} alt={getTitle(item.title)} />
+                      <span className="typeBadge">{detectType(item)}</span>
+                      {isBookmarked(item) && <span className="bookmarkedDot" />}
+                    </div>
+                    <div className="cardInfo">
+                      <h3 className="cardTitle">{getTitle(item.title)}</h3>
+                      {item.genres?.length > 0 && (
+                        <div className="genreRow">
+                          {item.genres.slice(0, 3).map((g) => (
+                            <span key={g} className="genrePill">{g}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-              <div className="imageWrapper">
-                <img src={b.imageUrl} alt={b.title} />
-
-                <div className="overlayCard">
-
-                  <button
-                    className="iconBtn favoriteBtn"
-                    onClick={() => toggleFavorite(b.id, b.favorite)}
-                  >
-                    <img src={b.favorite ? unlove : love} alt="" />
-                  </button>
-
-                  <button
-                    className="iconBtn deleteBtn"
-                    onClick={() => deleteBookmark(b.id)}
-                  >
-                    <img src={remove} alt="" />
-                  </button>
-
+                  <div className="cardBack">
+                    <div className="glass">
+                      <p className="backTitle">{getTitle(item.title)}</p>
+                      <p className="desc">{cleanHTML(item.description)}</p>
+                      <div className="actions">
+                        <button
+                          className={`bookmarkBtn${isBookmarked(item) ? " bookmarked" : ""}`}
+                          onClick={(e) => openBookmarkModal(e, item)}
+                        >
+                          {isBookmarked(item) ? "✏️ Edit" : "🔖 Add Bookmark"}
+                        </button>
+                        {isBookmarked(item) && (
+                          <button
+                            className="cancelBookmarkBtn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const existing = bookmarks.find((b) => b.mediaId === item.id);
+                              if (existing) removeBookmark(existing.id);
+                            }}
+                          >
+                            🗑
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
+          </div>
+          </>
+        )}
 
-              <div className="cardContent">
-                <h3>{b.title}</h3>
-              </div>
+        {/* ══ BOOKMARKS PAGE ══ */}
+        {page === "bookmarks" && (
+          <div className="bookmarksPage">
 
+            {/* Header */}
+            <div className="bookmarksHeader">
+              <h2 className="bookmarksTitle">🔖 Bookmarks</h2>
+              <button
+                className="addCategoryBtn"
+                onClick={() => setShowAddCategory((v) => !v)}
+              >
+                + New Category
+              </button>
             </div>
-          ))}
-        </div>
+
+            {/* Add Category Form */}
+            {showAddCategory && (
+              <div className="addCategoryForm">
+                <input
+                  type="text"
+                  placeholder="Category name (e.g. Manhwa, Romance...)"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addCategory()}
+                />
+                <button onClick={addCategory}>Add</button>
+                <button
+                  className="cancelBtn"
+                  onClick={() => setShowAddCategory(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {/* Category pills */}
+            {categories.length > 0 && (
+              <div className="categoryPills">
+                {categories.map((cat) => (
+                  <div key={cat.id} className="categoryPill">
+                    <span>{cat.name}</span>
+                    <button
+                      className="deleteCatBtn"
+                      onClick={() => deleteCategory(cat.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Bookmark search + filter */}
+            <div className="bookmarkControls">
+              <input
+                className="searchBar"
+                placeholder="Search bookmarks..."
+                value={bookmarkSearch}
+                onChange={(e) => setBookmarkSearch(e.target.value)}
+                style={{ marginBottom: 0, flex: 1 }}
+              />
+              <select
+                className="categorySelect"
+                value={bookmarkFilter}
+                onChange={(e) => setBookmarkFilter(e.target.value)}
+              >
+                <option value="all">All Categories</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Bookmark grid */}
+            {filteredBookmarks.length === 0 ? (
+              <p className="emptyState">
+                No bookmarks yet. Go to Home and add some! 📚
+              </p>
+            ) : (
+              <div className="grid" style={{ marginTop: "16px" }}>
+                {filteredBookmarks.map((b) => (
+                  <div
+                    key={b.id}
+                    className={`card${activeCard === b.id ? " flipped" : ""}`}
+                    onClick={() =>
+                      setActiveCard(activeCard === b.id ? null : b.id)
+                    }
+                  >
+                    {/* FRONT */}
+                    <div className="cardFront">
+                      <div className="cardCover">
+                        <img src={b.imageUrl} alt={b.title} />
+                        <span className="typeBadge">saved</span>
+                        <span className="bookmarkedDot" />
+                      </div>
+                      <div className="cardInfo">
+                        <h3 className="cardTitle">{b.title}</h3>
+                        {b.categories?.length > 0 && (
+                          <div className="genreRow">
+                            {b.categories.slice(0, 3).map((catId) => {
+                              const cat = categories.find((c) => c.id === catId);
+                              return cat ? (
+                                <span key={catId} className="genrePill">{cat.name}</span>
+                              ) : null;
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* BACK */}
+                    <div className="cardBack">
+                      <div className="glass">
+                        <p className="backTitle">{b.title}</p>
+                        {b.categories?.length > 0 && (
+                          <div className="backBadges">
+                            {b.categories.map((catId) => {
+                              const cat = categories.find((c) => c.id === catId);
+                              return cat ? (
+                                <span key={catId} className="badge">{cat.name}</span>
+                              ) : null;
+                            })}
+                          </div>
+                        )}
+                        <p className="desc">{b.description}</p>
+                        <div className="actions">
+                          <button
+                            className="editBtn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // open modal in edit mode using a reconstructed item-like object
+                              const fakeItem = {
+                                id: b.mediaId,
+                                title: { english: b.title },
+                                coverImage: { large: b.imageUrl },
+                                description: b.description,
+                              };
+                              openBookmarkModal(e, fakeItem);
+                            }}
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
+                            className="cancelBookmarkBtn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeBookmark(b.id);
+                            }}
+                          >
+                            🗑 Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
       </div>
+
+      {/* ══ MOBILE NAV ══ */}
+      <div className="mobileNav">
+        <button className={page === "home" ? "active" : ""} onClick={() => setPage("home")}>
+          <img src={homeIcon} alt="Home" />
+          <span>Home</span>
+        </button>
+        <button className={page === "bookmarks" ? "active" : ""} onClick={() => setPage("bookmarks")}>
+          <img src={bookmarkNavIcon} alt="Bookmarks" />
+          <span>Bookmarks</span>
+        </button>
+        <button onClick={logout}>
+          <img src={exitIcon} alt="Logout" />
+          <span>Logout</span>
+        </button>
+      </div>
+
+      {/* ══ BOOKMARK MODAL ══ */}
+      {bookmarkModalItem && (
+        <div className="modalOverlay" onClick={closeBookmarkModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modalTitle">Set Categories</h3>
+
+            {categories.length === 0 ? (
+              <p className="modalEmpty">
+                No categories yet. Go to the Bookmarks tab to create some.
+              </p>
+            ) : (
+              <div className="modalCategories">
+                {categories.map((cat) => (
+                  <label key={cat.id} className="categoryCheckbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedCategories.includes(cat.id)}
+                      onChange={() => toggleCategorySelection(cat.id)}
+                    />
+                    <span>{cat.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="modalActions">
+              <button className="okBtn" onClick={confirmBookmark}>
+                Ok
+              </button>
+              <button className="cancelModalBtn" onClick={closeBookmarkModal}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
+/* =========================
+   API FUNCTIONS
+========================= */
+
+const fetchTopAnime = async () => {
+  const query = `
+    query {
+      Page(page: 1, perPage: 20) {
+        media(type: ANIME, sort: SCORE_DESC) {
+          id type title { romaji english }
+          description genres countryOfOrigin
+          coverImage { large }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await res.json();
+  return data.data.Page.media.map((i) => ({ ...i, source: "anilist", mediaType: "anime" }));
+};
+
+const fetchTopManga = async () => {
+  const query = `
+    query {
+      Page(page: 1, perPage: 20) {
+        media(type: MANGA, sort: SCORE_DESC) {
+          id title { romaji english }
+          description genres countryOfOrigin
+          coverImage { large }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await res.json();
+  return data.data.Page.media.map((i) => ({ ...i, source: "anilist", mediaType: "manga" }));
+};
+
+const fetchTopManhwa = async () => {
+  const query = `
+    query {
+      Page(page: 1, perPage: 20) {
+        media(type: MANGA, countryOfOrigin: KR, sort: SCORE_DESC) {
+          id title { romaji english }
+          description genres countryOfOrigin
+          coverImage { large }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await res.json();
+  return data.data.Page.media.map((i) => ({ ...i, source: "anilist", mediaType: "manhwa" }));
+};
+
+const fetchTopManhua = async () => {
+  const query = `
+    query {
+      Page(page: 1, perPage: 20) {
+        media(type: MANGA, countryOfOrigin: CN, sort: SCORE_DESC) {
+          id title { romaji english }
+          description genres countryOfOrigin
+          coverImage { large }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  const data = await res.json();
+  return data.data.Page.media.map((i) => ({ ...i, source: "anilist", mediaType: "manhua" }));
+};
+
+const fetchMangaDex = async () => {
+  const res = await fetch(
+    "https://api.mangadex.org/manga?limit=20&includes[]=cover_art"
+  );
+  const data = await res.json();
+  return data.data.map((m) => {
+    const cover = m.relationships?.find((r) => r.type === "cover_art");
+    const file = cover?.attributes?.fileName;
+    return {
+      id: m.id,
+      title: {
+        english: m.attributes.title.en || Object.values(m.attributes.title)[0],
+      },
+      description: m.attributes.description.en || "",
+      genres: [],
+      coverImage: {
+        large: file
+          ? `https://uploads.mangadex.org/covers/${m.id}/${file}`
+          : "https://via.placeholder.com/300x400",
+      },
+      source: "mangadex",
+    };
+  });
+};
+
+const searchAniList = async (text) => {
+  const query = `
+    query ($search: String) {
+      Page(page: 1, perPage: 20) {
+        media(search: $search) {
+          id type title { romaji english }
+          description genres countryOfOrigin
+          coverImage { large }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables: { search: text } }),
+  });
+  const data = await res.json();
+  return data.data.Page.media.map((i) => ({ ...i, source: "anilist" }));
+};
 
 export default App;
