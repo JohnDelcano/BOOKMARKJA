@@ -114,7 +114,7 @@ function App() {
       }
     );
     return () => unsub();
-  }, []);}
+  }, []);
 
   const shuffleArray = (array) => {
   return [...array].sort(() => Math.random() - 0.5);
