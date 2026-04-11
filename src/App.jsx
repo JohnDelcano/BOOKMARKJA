@@ -816,36 +816,36 @@ const fetchTopManhua = async () => {
   }
 };
 
-const fetchMangaDex = async () => {
-  try {
-    const res = await fetchWithTimeout(
-      "https://api.mangadex.org/manga?limit=20&includes[]=cover_art"
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return (data.data || []).map((m) => {
-      const cover = m.relationships?.find((r) => r.type === "cover_art");
-      const file = cover?.attributes?.fileName;
-      return {
-        id: m.id,
-        title: {
-          english: m.attributes.title.en || Object.values(m.attributes.title)[0],
-        },
-        description: m.attributes.description.en || "",
-        genres: [],
-        coverImage: {
-          large: file
-            ? `https://uploads.mangadex.org/covers/${m.id}/${file}`
-            : "https://via.placeholder.com/300x400",
-        },
-        source: "mangadex",
-      };
-    });
-  } catch (error) {
-    console.error("fetchMangaDex failed:", error);
-    return [];
-  }
-};
+// const fetchMangaDex = async () => {
+//   try {
+//     const res = await fetchWithTimeout(
+//       "https://api.mangadex.org/manga?limit=20&includes[]=cover_art"
+//     );
+//     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+//     const data = await res.json();
+//     return (data.data || []).map((m) => {
+//       const cover = m.relationships?.find((r) => r.type === "cover_art");
+//       const file = cover?.attributes?.fileName;
+//       return {
+//         id: m.id,
+//         title: {
+//           english: m.attributes.title.en || Object.values(m.attributes.title)[0],
+//         },
+//         description: m.attributes.description.en || "",
+//         genres: [],
+//         coverImage: {
+//           large: file
+//             ? `https://uploads.mangadex.org/covers/${m.id}/${file}`
+//             : "https://via.placeholder.com/300x400",
+//         },
+//         source: "mangadex",
+//       };
+//     });
+//   } catch (error) {
+//     console.error("fetchMangaDex failed:", error);
+//     return [];
+//   }
+// };
 
 const searchAniList = async (text) => {
   const query = `
