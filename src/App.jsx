@@ -1,4 +1,4 @@
-import { useEffect, useState,  } from "react";
+import { useEffect, useState } from "react";
 import { db, auth } from "./firebase";
 import {
   addDoc,
@@ -27,13 +27,13 @@ function App() {
   /* =========================
      STATES
   ========================= */
-  const [user, setUser] = useState("loading"); // "loading" | null | { user object }
+  const [user, setUser] = useState("loading");
   const [page, setPage] = useState("home");
 
   const [feed, setFeed] = useState([]);
+  const [feedLoading, setFeedLoading] = useState(true);
   const [bookmarks, setBookmarks] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [feedLoading, setFeedLoading] = useState(true);
 
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -56,9 +56,8 @@ function App() {
      AUTH
   ========================= */
   useEffect(() => {
-    // Add 7-second timeout for auth to avoid infinite loading
     const authTimeout = setTimeout(() => {
-      console.warn("Auth loading timed out, showing login");
+      console.warn("Auth timeout - showing login");
       setUser(null);
     }, 7000);
 
@@ -132,10 +131,9 @@ function App() {
             fetchTopManga(),
             fetchTopManhwa(),
             fetchTopManhua(),
+            fetchMangaDex(),
           ]),
-          new Promise((resolve) =>
-            setTimeout(() => resolve("TIMEOUT"), 10000)
-          ),
+          new Promise((resolve) => setTimeout(() => resolve("TIMEOUT"), 10000)),
         ]);
 
         if (results === "TIMEOUT") {
@@ -145,13 +143,6 @@ function App() {
           setFeedLoading(false);
           return;
         }
-
-        // Log any failures for debugging
-        results.forEach((r, i) => {
-          if (r.status === "rejected") {
-            console.warn(`API ${i} failed:`, r.reason);
-          }
-        });
 
         // Extract only successful results
         const data = results
@@ -428,13 +419,7 @@ function App() {
                 >
                   <div className="cardFront">
                     <div className="cardCover">
-                    <img 
-                      src={item.coverImage?.large} 
-                      alt={getTitle(item.title)}
-                      onError={(e) => {
-                        e.target.src = 'https://via.placeholder.com/300x400?text=No+Image';
-                      }}
-                    />
+                      <img src={item.coverImage?.large} alt={getTitle(item.title)} />
                       <span className="typeBadge">{detectType(item)}</span>
                       {isBookmarked(item) && <span className="bookmarkedDot" />}
                     </div>
@@ -478,17 +463,6 @@ function App() {
                   </div>
                 </div>
               ))}
-            {!feedLoading && shuffledFeed.length === 0 && (
-              <div style={{ 
-                gridColumn: "1 / -1", 
-                textAlign: "center", 
-                padding: "40px 20px",
-                color: "#aaa"
-              }}>
-                <p style={{ fontSize: "18px", marginBottom: "10px" }}>No content loaded</p>
-                <p style={{ fontSize: "14px" }}>Try refreshing the page or check your internet connection</p>
-              </div>
-            )}
           </div>
           </>
         )}
@@ -761,7 +735,7 @@ const fetchTopAnime = async () => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return data.data?.Page?.media || [];
+    return (data.data?.Page?.media || []).map((i) => ({ ...i, source: "anilist", mediaType: "anime" }));
   } catch (error) {
     console.error("fetchTopAnime failed:", error);
     return [];
@@ -788,7 +762,7 @@ const fetchTopManga = async () => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return data.data?.Page?.media || [];
+    return (data.data?.Page?.media || []).map((i) => ({ ...i, source: "anilist", mediaType: "manga" }));
   } catch (error) {
     console.error("fetchTopManga failed:", error);
     return [];
@@ -815,7 +789,7 @@ const fetchTopManhwa = async () => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return data.data?.Page?.media || [];
+    return (data.data?.Page?.media || []).map((i) => ({ ...i, source: "anilist", mediaType: "manhwa" }));
   } catch (error) {
     console.error("fetchTopManhwa failed:", error);
     return [];
@@ -842,43 +816,45 @@ const fetchTopManhua = async () => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return data.data?.Page?.media || [];
+    return (data.data?.Page?.media || []).map((i) => ({ ...i, source: "anilist", mediaType: "manhua" }));
   } catch (error) {
     console.error("fetchTopManhua failed:", error);
     return [];
   }
 };
 
-// const fetchMangaDex = async () => {
-//   try {
-//     const res = await fetchWithTimeout(
-//       "https://api.mangadex.org/manga?limit=20&includes[]=cover_art"
-//     );
-//     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-//     const data = await res.json();
-//     return (data.data || []).map((m) => {
-//       const cover = m.relationships?.find((r) => r.type === "cover_art");
-//       const file = cover?.attributes?.fileName;
-//       return {
-//         id: m.id,
-//         title: {
-//           english: m.attributes.title.en || Object.values(m.attributes.title)[0],
-//         },
-//         description: m.attributes.description.en || "",
-//         genres: [],
-//         coverImage: {
-//           large: file
-//             ? `https://uploads.mangadex.org/covers/${m.id}/${file}`
-//             : "https://via.placeholder.com/300x400",
-//         },
-//         source: "mangadex",
-//       };
-//     });
-//   } catch (error) {
-//     console.error("fetchMangaDex failed:", error);
-//     return [];
-//   }
-// };
+const fetchMangaDex = async () => {
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.mangadex.org/manga?limit=20&includes[]=cover_art",
+      {},
+      8000
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return (data.data || []).map((m) => {
+      const cover = m.relationships?.find((r) => r.type === "cover_art");
+      const file = cover?.attributes?.fileName;
+      return {
+        id: m.id,
+        title: {
+          english: m.attributes.title.en || Object.values(m.attributes.title)[0],
+        },
+        description: m.attributes.description.en || "",
+        genres: [],
+        coverImage: {
+          large: file
+            ? `https://uploads.mangadex.org/covers/${m.id}/${file}`
+            : "https://via.placeholder.com/300x400",
+        },
+        source: "mangadex",
+      };
+    });
+  } catch (error) {
+    console.error("fetchMangaDex failed:", error);
+    return [];
+  }
+};
 
 const searchAniList = async (text) => {
   const query = `
@@ -900,7 +876,7 @@ const searchAniList = async (text) => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return data.data?.Page?.media || [];
+    return (data.data?.Page?.media || []).map((i) => ({ ...i, source: "anilist" }));
   } catch (error) {
     console.error("searchAniList failed:", error);
     return [];
