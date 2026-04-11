@@ -97,22 +97,32 @@ function App() {
   ========================= */
   useEffect(() => {
     const load = async () => {
-      const [anime, manga, manhwa, manhua, md] = await Promise.all([
-        fetchTopAnime(),
-        fetchTopManga(),
-        fetchTopManhwa(),
-        fetchTopManhua(),
-        fetchMangaDex(),
-      ]);
+      try {
+        const results = await Promise.allSettled([
+          fetchTopAnime(),
+          fetchTopManga(),
+          fetchTopManhwa(),
+          fetchTopManhua(),
+          fetchMangaDex(),
+        ]);
 
-      const merged = [...anime, ...manga, ...manhwa, ...manhua, ...md];
+        // Extract only successful results
+        const data = results
+          .filter((r) => r.status === "fulfilled")
+          .map((r) => r.value)
+          .flat();
 
-      const unique = Array.from(
-        new Map(merged.map((i) => [`${i.source}-${i.id}`, i])).values()
-      );
+        const unique = Array.from(
+          new Map(data.map((i) => [`${i.source}-${i.id}`, i])).values()
+        );
 
-      setFeed(unique);
-      setShuffledFeed(shuffleArray(unique)); // shuffle once only
+        setFeed(unique);
+        setShuffledFeed(shuffleArray(unique));
+      } catch (error) {
+        console.error("Error loading feed:", error);
+        setFeed([]);
+        setShuffledFeed([]);
+      }
     };
 
     load();
@@ -635,6 +645,20 @@ function App() {
    API FUNCTIONS
 ========================= */
 
+// Helper function to add timeout to fetch
+const fetchWithTimeout = async (url, options = {}, timeout = 8000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+};
+
 const fetchTopAnime = async () => {
   const query = `
     query {
@@ -655,7 +679,7 @@ const fetchTopAnime = async () => {
       }
     }
   `;
-  const res = await fetch("https://graphql.anilist.co", {
+  const res = await fetchWithTimeout("https://graphql.anilist.co", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
@@ -676,7 +700,7 @@ const fetchTopManga = async () => {
       }
     }
   `;
-  const res = await fetch("https://graphql.anilist.co", {
+  const res = await fetchWithTimeout("https://graphql.anilist.co", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
@@ -697,7 +721,7 @@ const fetchTopManhwa = async () => {
       }
     }
   `;
-  const res = await fetch("https://graphql.anilist.co", {
+  const res = await fetchWithTimeout("https://graphql.anilist.co", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
@@ -718,7 +742,7 @@ const fetchTopManhua = async () => {
       }
     }
   `;
-  const res = await fetch("https://graphql.anilist.co", {
+  const res = await fetchWithTimeout("https://graphql.anilist.co", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
@@ -728,7 +752,7 @@ const fetchTopManhua = async () => {
 };
 
 const fetchMangaDex = async () => {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     "https://api.mangadex.org/manga?limit=20&includes[]=cover_art"
   );
   const data = await res.json();
